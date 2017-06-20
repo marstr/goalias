@@ -1,9 +1,11 @@
 package main
 
 import (
+	"bytes"
 	"fmt"
 	"go/ast"
 	"go/parser"
+	"go/printer"
 	"go/token"
 	"log"
 	"os"
@@ -12,6 +14,12 @@ import (
 )
 
 var debugLog *log.Logger
+
+type myConst struct {
+	Name  string
+	Type  ast.Expr
+	Value ast.Expr
+}
 
 type aliasMaker struct {
 	Types  *collection.List
@@ -60,9 +68,26 @@ func createAliasPackage(source, destination string) (err error) {
 		fmt.Println("\t", entry)
 	}
 
-	constNames := maker.Consts.Enumerate().Select(func(x interface{}) interface{} {
-		cast, ok := x.(*ast.Const)
+	constDecls := maker.Consts.Enumerate().Select(func(x interface{}) interface{} {
+		cast, ok := x.(myConst)
+		if !ok {
+			return nil
+		}
+		lineOut := bytes.NewBufferString("Name: ")
+		fmt.Fprintf(lineOut, "%s Type: ", cast.Name)
+		printer.Fprint(lineOut, sourceFiles, cast.Type)
+		fmt.Fprint(lineOut, " Value: ")
+		printer.Fprint(lineOut, sourceFiles, cast.Value)
+		return lineOut.String()
+	}).Where(func(x interface{}) bool {
+		_, ok := x.(string)
+		return ok
 	})
+
+	fmt.Println("Consts:")
+	for entry := range constDecls {
+		fmt.Println("\t", entry)
+	}
 
 	return nil
 }
@@ -78,6 +103,18 @@ func (maker aliasMaker) Visit(node ast.Node) ast.Visitor {
 		if cast.Tok == token.TYPE {
 			for _, spec := range cast.Specs {
 				maker.Types.Add(spec)
+			}
+		} else if cast.Tok == token.CONST {
+			for _, spec := range cast.Specs {
+				valSpec := spec.(*ast.ValueSpec)
+				for i, name := range valSpec.Names {
+					maker.Consts.Add(myConst{
+						Name:  name.Name,
+						Type:  valSpec.Type,
+						Value: valSpec.Values[i],
+					})
+				}
+				debugLog.Printf("Names: %d Values: %d\n", len(valSpec.Names), len(valSpec.Values))
 			}
 		}
 	}
