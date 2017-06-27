@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"go/ast"
 	"go/parser"
-	"go/printer"
 	"go/token"
 	"log"
 	"os"
@@ -43,53 +42,31 @@ func createAliasPackage(source, destination string) (err error) {
 	var packages map[string]*ast.Package
 	packages, err = parser.ParseDir(sourceFiles, source, nil, 0)
 
+	for _, pkg := range packages {
+		maker := aliasMaker{
+			Types:  collection.NewList(),
+			Consts: collection.NewList(),
+		}
+		ast.Walk(maker, pkg)
+	}
+
+	return nil
+}
+
+func createAliasHelper(original *ast.Package) string {
+
 	maker := aliasMaker{
 		Types:  collection.NewList(),
 		Consts: collection.NewList(),
 	}
+	ast.Walk(maker, original)
 
-	for _, pkg := range packages {
-		ast.Walk(maker, pkg)
+	output := bytes.Buffer{}
+	for t := range maker.Types.Enumerate(nil) {
+		fmt.Println(t)
 	}
 
-	typeNames := maker.Types.Enumerate().Select(func(x interface{}) interface{} {
-		cast, ok := x.(*ast.TypeSpec)
-		if !ok {
-			return nil
-		}
-		return cast.Name.Name
-	}).Where(func(x interface{}) bool {
-		_, ok := x.(string)
-		return ok
-	})
-
-	fmt.Println("Types:")
-	for entry := range typeNames {
-		fmt.Println("\t", entry)
-	}
-
-	constDecls := maker.Consts.Enumerate().Select(func(x interface{}) interface{} {
-		cast, ok := x.(myConst)
-		if !ok {
-			return nil
-		}
-		lineOut := bytes.NewBufferString("Name: ")
-		fmt.Fprintf(lineOut, "%s Type: ", cast.Name)
-		printer.Fprint(lineOut, sourceFiles, cast.Type)
-		fmt.Fprint(lineOut, " Value: ")
-		printer.Fprint(lineOut, sourceFiles, cast.Value)
-		return lineOut.String()
-	}).Where(func(x interface{}) bool {
-		_, ok := x.(string)
-		return ok
-	})
-
-	fmt.Println("Consts:")
-	for entry := range constDecls {
-		fmt.Println("\t", entry)
-	}
-
-	return nil
+	return output.String()
 }
 
 func (maker aliasMaker) Visit(node ast.Node) ast.Visitor {
