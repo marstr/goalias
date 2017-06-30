@@ -43,11 +43,7 @@ func createAliasPackage(source, destination string) (err error) {
 	packages, err = parser.ParseDir(sourceFiles, source, nil, 0)
 
 	for _, pkg := range packages {
-		maker := aliasMaker{
-			Types:  collection.NewList(),
-			Consts: collection.NewList(),
-		}
-		ast.Walk(maker, pkg)
+		fmt.Println(createAliasHelper(pkg))
 	}
 
 	return nil
@@ -61,9 +57,13 @@ func createAliasHelper(original *ast.Package) string {
 	}
 	ast.Walk(maker, original)
 
-	output := bytes.Buffer{}
+	output := &bytes.Buffer{}
+	publicTypes := collection.Where(maker.Types, func(x interface{}) bool {
+
+	})
 	for t := range maker.Types.Enumerate(nil) {
-		fmt.Println(t)
+		name := t.(*ast.TypeSpec).Name.Name
+		fmt.Fprintln(output, "type", name, "=", "original."+name)
 	}
 
 	return output.String()
