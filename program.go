@@ -2,12 +2,12 @@ package main
 
 import (
 	"errors"
+	"flag"
 	"fmt"
 	"go/ast"
 	"go/parser"
 	"go/token"
 	"io"
-	"io/ioutil"
 	"log"
 	"os"
 	"path"
@@ -15,6 +15,7 @@ import (
 	"regexp"
 	"strings"
 
+	petname "github.com/dustinkirkland/golang-petname"
 	"github.com/marstr/collection"
 )
 
@@ -32,18 +33,61 @@ type aliasMaker struct {
 }
 
 func init() {
-	//debugWriter := os.Stderr
-	debugWriter := ioutil.Discard
+	debugWriter := os.Stderr
+	//debugWriter := ioutil.Discard
 	debugLog = log.New(debugWriter, "[DEBUG] ", 0)
 }
 
 func main() {
-	for _, dir := range os.Args[1:] {
-		err := createAliasPackage(dir, "")
+	exitVal := 1
+	defer func() {
+		os.Exit(exitVal)
+	}()
+
+	var profileName string
+	var rootDir string
+
+	goPath := os.Getenv("GOPATH")
+
+	var targetPackages collection.Enumerable
+
+	flag.StringVar(&rootDir, "root", getDefaultRoot(), "The base repository for each ")
+	flag.StringVar(&profileName, "profile", "", "The name that should be branded on the generated profile. By default random words are generated.")
+	flag.Parse()
+
+	targetPackages = packageFinder{
+		root: rootDir,
+	}
+
+	if profileName == "" {
+		profileName = petname.Generate(3, "-")
+		fmt.Println("Profile Name: ", profileName)
+	}
+	debugLog.Println(profileName)
+
+	for entry := range targetPackages.Enumerate(nil) {
+		var err error
+		var destination string
+
+		dir, ok := entry.(string)
+		if !ok {
+			return
+		}
+
+		destination, err = getAliasPath(dir, profileName)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return
+		}
+
+		destination = path.Join(goPath, "src", destination)
+
+		err = createAliasPackage(dir, destination)
 		if err != nil {
 			debugLog.Print(err)
 		}
 	}
+	exitVal = 0
 }
 
 func createAliasPackage(source, destination string) (err error) {
@@ -60,13 +104,18 @@ func createAliasPackage(source, destination string) (err error) {
 		return
 	}
 
+	os.MkdirAll(destination, os.ModePerm|os.ModeDir)
+
+	outputPath := filepath.Join(destination, "models.go")
+
 	var outputFile *os.File
-	outputFile, err = os.Create(filepath.Join(destination, "models.go"))
+	outputFile, err = os.Create(outputPath)
 	if err != nil {
 		return
 	}
 
-	// This should only iterate once, but allows us to separate
+	// This should only iterate once, but allows us to access this map without
+	// knowing the name of the package.
 	for _, pkg := range packages {
 		createAliasHelper(pkg, source, outputFile)
 	}
@@ -84,10 +133,12 @@ func createAliasHelper(original *ast.Package, pkgPath string, output io.Writer) 
 	ast.Walk(maker, original)
 
 	fmt.Fprintln(output, "package", original.Name)
+	fmt.Fprintln(output)
 
 	fmt.Fprintln(output, "import (")
 	fmt.Fprintln(output, "\t", "original", "\""+trimGoPath(pkgPath)+"\"")
 	fmt.Fprintln(output, ")")
+	fmt.Fprintln(output)
 
 	if collection.Any(maker.Types) {
 		fmt.Fprintln(output, "type (")
@@ -96,6 +147,7 @@ func createAliasHelper(original *ast.Package, pkgPath string, output io.Writer) 
 			fmt.Fprintln(output, "\t", name, "=", "original."+name)
 		}
 		fmt.Fprintln(output, ")")
+		fmt.Fprintln(output)
 	}
 
 	if collection.Any(maker.Consts) {
@@ -130,11 +182,27 @@ func (maker aliasMaker) Visit(node ast.Node) ast.Visitor {
 						Value: valSpec.Values[i],
 					})
 				}
-				debugLog.Printf("Names: %d Values: %d\n", len(valSpec.Names), len(valSpec.Values))
 			}
 		}
 	}
 	return nil
+}
+
+var rawPathPattern = regexp.MustCompile(`github.com/Azure/azure-sdk-for-go/arm/([\w_\-/\\\.]+)/(?:\d{4}-\d{2}-\d{2})(?:-[\w\.\d]+)?/([\w_\-/\\\.]+)`)
+
+// getAliasPath takes an existing API Version path and a package name, and converts the path
+// to a path which uses the new profile layout.
+func getAliasPath(subject, profile string) (transformed string, err error) {
+	subject = strings.TrimSuffix(subject, "/")
+	subject = trimGoPath(subject)
+	matches := rawPathPattern.FindAllStringSubmatch(subject, -1)
+	if matches == nil {
+		err = errors.New("path does not resemble a known package path")
+		return
+	}
+
+	transformed = fmt.Sprint("github.com/Azure/azure-sdk-for-go/arm/profile/", profile, "/", matches[0][1], "/", matches[0][2])
+	return
 }
 
 // trimGoPath removes the prefix defined in the environment variabe GOPATH if it is present in the string provided.
@@ -144,34 +212,54 @@ var trimGoPath = func() func(string) string {
 
 	return func(subject string) string {
 		splitPath := strings.Split(subject, string(os.PathSeparator))
-		debugLog.Println(len(splitPath))
 		for i, dir := range splitGo {
 			if splitPath[i] != dir {
-				debugLog.Println(splitPath[i], "!=", dir)
 				return subject
 			}
 		}
 		packageIdentifier := splitPath[len(splitGo):]
-		debugLog.Println("Joining this: ", packageIdentifier)
 		return path.Join(packageIdentifier...)
 	}
 }()
 
-// getAliasPath takes an existing API Version path and a package name, and converts the path
-// to a path which uses the new profile layout.
-var getAliasPath = func() func(string, string) (string, error) {
+func getDefaultRoot() string {
+	return path.Join(os.Getenv("GOPATH"), "src", "github.com", "Azure", "azure-sdk-for-go", "arm")
+}
 
-	rawPathPattern := regexp.MustCompile(`github.com/Azure/azure-sdk-for-go/arm/([\w_\-/\\\.]+)/(?:\d{4}-\d{2}-\d{2})(?:-[\w\.\d]+)?/([\w_\-/\\\.]+)`)
+type packageFinder struct {
+	root string
+}
 
-	return func(subject, profile string) (string, error) {
-		var err error
-		subject = strings.TrimSuffix(subject, "/")
-		matches := rawPathPattern.FindAllStringSubmatch(subject, -1)
-		if matches == nil {
-			err = errors.New("path does not resemble a known package path")
-			return "", err
-		}
+func (finder packageFinder) Enumerate(cancel <-chan struct{}) collection.Enumerator {
+	results := make(chan interface{})
+	go func() {
+		defer close(results)
 
-		return fmt.Sprint("github.com/Azure/azure-sdk-for-go/arm/profile/", profile, "/", matches[0][1], "/", matches[0][2]), nil
-	}
-}()
+		filepath.Walk(finder.root, func(localPath string, info os.FileInfo, openErr error) (err error) {
+			if !info.IsDir() || openErr != nil {
+				return
+			}
+			if info.Name() == "vendor" {
+				err = filepath.SkipDir
+				return
+			}
+
+			files := &token.FileSet{}
+
+			if pkgs, parseErr := parser.ParseDir(files, localPath, nil, 0); parseErr != nil || len(pkgs) < 1 {
+				return
+			}
+
+			select {
+			case results <- localPath:
+				// Intentionally Left Blank
+			case <-cancel:
+				err = errors.New("enumeration cancelled")
+				return
+			}
+
+			return
+		})
+	}()
+	return results
+}
