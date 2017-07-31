@@ -188,20 +188,36 @@ func (maker aliasMaker) Visit(node ast.Node) ast.Visitor {
 	return nil
 }
 
-var rawPathPattern = regexp.MustCompile(`github.com/Azure/azure-sdk-for-go/arm/([\w_\-/\\\.]+)/(?:\d{4}-\d{2}-\d{2})(?:-[\w\.\d]+)?/([\w_\-/\\\.]+)`)
+var rawPackagePath = regexp.MustCompile(`github.com/Azure/azure-sdk-for-go/service/(?P<rp>[\w\d\-\.]+)/(?P<management>management/)?(?P<APIVersion>[\w\d\-\.]+)/(?P<resource>[\w\d\-\.]+)`)
 
 // getAliasPath takes an existing API Version path and a package name, and converts the path
 // to a path which uses the new profile layout.
 func getAliasPath(subject, profile string) (transformed string, err error) {
 	subject = strings.TrimSuffix(subject, "/")
 	subject = trimGoPath(subject)
-	matches := rawPathPattern.FindAllStringSubmatch(subject, -1)
+
+	matches := rawPackagePath.FindAllStringSubmatch(subject, -1)
 	if matches == nil {
 		err = errors.New("path does not resemble a known package path")
 		return
 	}
 
-	transformed = fmt.Sprint("github.com/Azure/azure-sdk-for-go/arm/profile/", profile, "/", matches[0][1], "/", matches[0][2])
+	output := []string{
+		"github.com",
+		"Azure",
+		"azure-sdk-for-go",
+		"profile",
+		profile,
+		matches[0][1],
+	}
+
+	if matches[0][2] == "management/" {
+		output = append(output, "management")
+	}
+
+	output = append(output, matches[0][4])
+
+	transformed = strings.Join(output, "/")
 	return
 }
 
@@ -223,7 +239,7 @@ var trimGoPath = func() func(string) string {
 }()
 
 func getDefaultRoot() string {
-	return path.Join(os.Getenv("GOPATH"), "src", "github.com", "Azure", "azure-sdk-for-go", "arm")
+	return path.Join(os.Getenv("GOPATH"), "src", "github.com", "Azure", "azure-sdk-for-go", "service")
 }
 
 type packageFinder struct {

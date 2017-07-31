@@ -11,12 +11,12 @@ func Test_getAliasPath(t *testing.T) {
 		expected string
 	}{
 		{
-			"github.com/Azure/azure-sdk-for-go/arm/resources/managedapplications/2016-09-01-preview/managedapplications",
-			"github.com/Azure/azure-sdk-for-go/arm/profile/example/resources/managedapplications/managedapplications",
+			"github.com/Azure/azure-sdk-for-go/service/resources/management/2016-09-01-preview/managedapplications",
+			"github.com/Azure/azure-sdk-for-go/profile/example/resources/management/managedapplications",
 		},
 		{
-			"github.com/Azure/azure-sdk-for-go/arm/cdn/2016-10-02/cdn",
-			"github.com/Azure/azure-sdk-for-go/arm/profile/example/cdn/cdn",
+			`github.com/Azure/azure-sdk-for-go/service/cdn/management/2016-10-02/cdn`,
+			"github.com/Azure/azure-sdk-for-go/profile/example/cdn/management/cdn",
 		},
 	}
 
