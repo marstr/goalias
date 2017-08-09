@@ -15,8 +15,8 @@ import (
 	"regexp"
 	"strings"
 
-	petname "github.com/dustinkirkland/golang-petname"
 	"github.com/marstr/collection"
+	"github.com/marstr/randname"
 )
 
 var debugLog *log.Logger
@@ -30,6 +30,7 @@ type myConst struct {
 type aliasMaker struct {
 	Types  *collection.List
 	Consts *collection.List
+	Funcs  *collection.List
 }
 
 func init() {
@@ -60,7 +61,7 @@ func main() {
 	}
 
 	if profileName == "" {
-		profileName = petname.Generate(3, "-")
+		profileName = randname.AdjNoun{}.Generate()
 		fmt.Println("Profile Name: ", profileName)
 	}
 	debugLog.Println(profileName)
@@ -129,8 +130,12 @@ func createAliasHelper(original *ast.Package, pkgPath string, output io.Writer) 
 	maker := aliasMaker{
 		Types:  collection.NewList(),
 		Consts: collection.NewList(),
+		Funcs:  collection.NewList(),
 	}
 	ast.Walk(maker, original)
+
+	fmt.Fprintln(output, "// +build go1.9")
+	fmt.Fprintln(output)
 
 	fmt.Fprintln(output, "package", original.Name)
 	fmt.Fprintln(output)
@@ -158,6 +163,24 @@ func createAliasHelper(original *ast.Package, pkgPath string, output io.Writer) 
 		}
 		fmt.Fprintln(output, ")")
 	}
+
+	for f := range maker.Funcs.Enumerate(nil) {
+		cast := f.(*ast.FuncDecl)
+
+		comments := collection.Empty
+
+		if cast.Doc != nil {
+			comments = collection.Where(collection.AsEnumerable(cast.Doc.List), func(x interface{}) bool {
+				return x != nil
+			})
+		}
+
+		for comment := range comments.Enumerate(nil) {
+			fmt.Fprintln(output, "//", comment.(*ast.Comment).Text)
+		}
+
+		fmt.Fprintln(output, "// func", cast.Name.Name)
+	}
 }
 
 func (maker aliasMaker) Visit(node ast.Node) ast.Visitor {
@@ -166,6 +189,8 @@ func (maker aliasMaker) Visit(node ast.Node) ast.Visitor {
 		return maker
 	case *ast.File:
 		return maker
+	case *ast.FuncDecl:
+		maker.Funcs.Add(node)
 	case *ast.GenDecl:
 		cast := node.(*ast.GenDecl)
 		if cast.Tok == token.TYPE {
@@ -240,42 +265,4 @@ var trimGoPath = func() func(string) string {
 
 func getDefaultRoot() string {
 	return path.Join(os.Getenv("GOPATH"), "src", "github.com", "Azure", "azure-sdk-for-go", "service")
-}
-
-type packageFinder struct {
-	root string
-}
-
-func (finder packageFinder) Enumerate(cancel <-chan struct{}) collection.Enumerator {
-	results := make(chan interface{})
-	go func() {
-		defer close(results)
-
-		filepath.Walk(finder.root, func(localPath string, info os.FileInfo, openErr error) (err error) {
-			if !info.IsDir() || openErr != nil {
-				return
-			}
-			if info.Name() == "vendor" {
-				err = filepath.SkipDir
-				return
-			}
-
-			files := &token.FileSet{}
-
-			if pkgs, parseErr := parser.ParseDir(files, localPath, nil, 0); parseErr != nil || len(pkgs) < 1 {
-				return
-			}
-
-			select {
-			case results <- localPath:
-				// Intentionally Left Blank
-			case <-cancel:
-				err = errors.New("enumeration cancelled")
-				return
-			}
-
-			return
-		})
-	}()
-	return results
 }
