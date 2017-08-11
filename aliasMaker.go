@@ -19,18 +19,64 @@ func (utoken ErrorUnexpectedToken) Error() string {
 }
 
 const modelFile = "models.go"
+const origImportAlias = "original"
 
+// ModelFile is a getter for the file accumulating aliased content.
+func (alias AliasPackage) ModelFile() (result *ast.File) {
+	if alias.Files != nil {
+		result = alias.Files[modelFile]
+	}
+	return
+}
+
+// SetModelFile is a setter for the file accumulating aliased content.
+func (alias *AliasPackage) SetModelFile(val *ast.File) {
+	if alias.Files == nil {
+		alias.Files = make(map[string]*ast.File)
+	}
+
+	alias.Files[modelFile] = val
+}
+
+// NewAliasPackage stuff and things
 func NewAliasPackage(original *ast.Package) (alias *AliasPackage, err error) {
+	const buildTag = "// +build go1.9"
+	models := &ast.File{
+		Name: &ast.Ident{
+			Name: original.Name,
+		},
+		Package: token.Pos(len(buildTag) + 1),
+	}
+
 	alias = &AliasPackage{
 		Name: original.Name,
 		Files: map[string]*ast.File{
-			modelFile: &ast.File{
+			modelFile: models,
+		},
+	}
+
+	models.Comments = append(models.Comments, &ast.CommentGroup{
+		List: []*ast.Comment{
+			&ast.Comment{
+				Text: buildTag,
+			},
+		},
+	})
+
+	models.Decls = append(models.Decls, &ast.GenDecl{
+		Tok: token.IMPORT,
+		Specs: []ast.Spec{
+			&ast.ImportSpec{
 				Name: &ast.Ident{
-					Name: "models",
+					Name: origImportAlias,
+				},
+				Path: &ast.BasicLit{
+					Kind:  token.STRING,
+					Value: fmt.Sprintf("\"%s\"", original.Name),
 				},
 			},
 		},
-	}
+	})
 
 	return
 }
@@ -45,15 +91,22 @@ func (alias *AliasPackage) AddConst(decl *ast.GenDecl) (err error) {
 		return
 	}
 
-	targetFile, ok := alias.Files[modelFile]
-	if !ok {
-		targetFile = &ast.File{
-			Name: &ast.Ident{
-				Name: "models",
-			},
+	targetFile := alias.ModelFile()
+
+	for _, spec := range decl.Specs {
+		cast := spec.(*ast.ValueSpec)
+		for j, name := range cast.Names {
+			cast.Values[j] = &ast.SelectorExpr{
+				X: &ast.Ident{
+					Name: origImportAlias,
+				},
+				Sel: &ast.Ident{
+					Name: name.Name,
+				},
+			}
 		}
-		alias.Files[modelFile] = targetFile
 	}
+
 	targetFile.Decls = append(targetFile.Decls, decl)
 
 	return
@@ -61,10 +114,16 @@ func (alias *AliasPackage) AddConst(decl *ast.GenDecl) (err error) {
 
 // AddType adds a Type delcaration block with individual alias for each Spec handed in `decl`
 func (alias *AliasPackage) AddType(decl *ast.GenDecl) (err error) {
-	if decl.Tok != token.TYPE {
+	if decl == nil {
+		err = errors.New("unexpected nil")
+		return
+	} else if decl.Tok != token.TYPE {
 		err = ErrorUnexpectedToken{Expected: token.TYPE, Received: decl.Tok}
 		return
 	}
+
+	targetFile := alias.ModelFile()
+	for 
 
 	return
 }

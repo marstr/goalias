@@ -19,7 +19,17 @@ func TestAliasMaker_AddConst(t *testing.T) {
 		t.Error(err)
 	}
 
-	subject := NewAliasPackage(fileContents)
+	wrapper := &ast.Package{
+		Name: "wrapper",
+		Files: map[string]*ast.File{
+			"testdata/publicconst.go": fileContents,
+		},
+	}
+
+	subject, err := NewAliasPackage(wrapper)
+	if err != nil {
+		t.Error(err)
+	}
 	var constDecls collection.Enumerable = PackageWalker{target: fileContents}
 
 	constDecls = collection.Where(constDecls, func(x interface{}) bool {

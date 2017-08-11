@@ -1,4 +1,9 @@
+// +build go1.7
 package main
+
+import (
+	"net/http"
+)
 
 // Foo is a useless const in the scheme of things
 const Foo = "item"
@@ -10,4 +15,9 @@ type B string
 const (
 	Bar B = "bar"
 	Baz B = "baz"
+)
+
+// Contents of this block should also be ignored
+const (
+	Bak B = http.MethodGet
 )
