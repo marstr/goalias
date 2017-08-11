@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"go/ast"
 	"go/token"
+
+	"github.com/marstr/collection"
 )
 
 type AliasPackage ast.Package
@@ -78,7 +80,40 @@ func NewAliasPackage(original *ast.Package) (alias *AliasPackage, err error) {
 		},
 	})
 
+	walker := PackageWalker{target: original}
+
+	generalDecls := collection.Where(walker, func(x interface{}) (ok bool) {
+		_, ok = x.(*ast.GenDecl)
+		return
+	})
+
+	for item := range generalDecls.Enumerate(nil) {
+		alias.AddGeneral(item.(*ast.GenDecl))
+	}
+
+	funcDecls := collection.Where(walker, func(x interface{}) (ok bool) {
+		_, ok = x.(*ast.FuncDecl)
+		return
+	})
+
+	for item := range funcDecls.Enumerate(nil) {
+		alias.AddFunc(item.(*ast.FuncDecl))
+	}
+
 	return
+}
+
+func (alias *AliasPackage) AddGeneral(decl *ast.GenDecl) error {
+	var adder func(*ast.GenDecl) error
+
+	switch decl.Tok {
+	case token.CONST:
+		adder = alias.AddConst
+	case token.TYPE:
+		adder = alias.AddType
+	}
+
+	return adder(decl)
 }
 
 // AddConst adds a Const block with indiviual aliases for each Spec in `decl`.
@@ -123,8 +158,21 @@ func (alias *AliasPackage) AddType(decl *ast.GenDecl) (err error) {
 	}
 
 	targetFile := alias.ModelFile()
-	for 
 
+	for _, spec := range decl.Specs {
+		cast := spec.(*ast.TypeSpec)
+		cast.Assign = 0
+		cast.Type = &ast.SelectorExpr{
+			X: &ast.Ident{
+				Name: origImportAlias,
+			},
+			Sel: &ast.Ident{
+				Name: cast.Name.Name,
+			},
+		}
+	}
+
+	targetFile.Decls = append(targetFile.Decls, decl)
 	return
 }
 
