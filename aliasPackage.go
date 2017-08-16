@@ -44,6 +44,9 @@ func (alias *AliasPackage) SetModelFile(val *ast.File) {
 
 // NewAliasPackage stuff and things
 func NewAliasPackage(original *ast.Package) (alias *AliasPackage, err error) {
+
+	ast.PackageExports(original)
+
 	const buildTag = "// +build go1.9"
 	models := &ast.File{
 		Name: &ast.Ident{
@@ -100,6 +103,21 @@ func NewAliasPackage(original *ast.Package) (alias *AliasPackage, err error) {
 
 	funcDecls := collection.Where(walker, func(x interface{}) (ok bool) {
 		_, ok = x.(*ast.FuncDecl)
+		return
+	})
+
+	funcDecls = collection.Where(funcDecls, func(x interface{}) (ok bool) {
+		cast, ok := x.(*ast.FuncDecl)
+		if !ok {
+			return
+		}
+
+		if cast.Recv == nil {
+			ok = true
+			return
+		}
+
+		ok = len(cast.Recv.List) == 0
 		return
 	})
 

@@ -1,268 +1,102 @@
 package main
 
 import (
-	"errors"
 	"flag"
 	"fmt"
 	"go/ast"
 	"go/parser"
+	"go/printer"
 	"go/token"
 	"io"
-	"log"
 	"os"
-	"path"
-	"path/filepath"
-	"regexp"
-	"strings"
-
-	"github.com/marstr/collection"
-	"github.com/marstr/randname"
 )
 
-var debugLog *log.Logger
+var (
+	output  io.Writer
+	subject *ast.Package
+)
 
-type myConst struct {
-	Name  string
-	Type  ast.Expr
-	Value ast.Expr
-}
+func main() {
+	var err error
+	exitStatus := 1
+	defer func() {
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(exitStatus)
+		}
+	}()
 
-type aliasMaker struct {
-	Types  *collection.List
-	Consts *collection.List
-	Funcs  *collection.List
+	aliased, err := NewAliasPackage(subject)
+	if err != nil {
+		return
+	}
+
+	var files token.FileSet
+
+	//err = format.Node(output, &files, aliased.ModelFile())
+	err = printer.Fprint(output, &files, aliased.ModelFile())
+	if err != nil {
+		return
+	}
 }
 
 func init() {
-	debugWriter := os.Stderr
-	//debugWriter := ioutil.Discard
-	debugLog = log.New(debugWriter, "[DEBUG] ", 0)
-}
-
-func main() {
-	exitVal := 1
-	defer func() {
-		os.Exit(exitVal)
-	}()
-
-	var profileName string
-	var rootDir string
-
-	goPath := os.Getenv("GOPATH")
-
-	var targetPackages collection.Enumerable
-
-	flag.StringVar(&rootDir, "root", getDefaultRoot(), "The base repository for each ")
-	flag.StringVar(&profileName, "profile", "", "The name that should be branded on the generated profile. By default random words are generated.")
+	var outputLocation string
+	var inputLocation string
+	flag.StringVar(&outputLocation, "o", "", "The name of the output file that should be generated.")
+	flag.StringVar(&inputLocation, "i", "", "The file or directory containing Go source to be aliased.")
 	flag.Parse()
 
-	targetPackages = packageFinder{
-		root: rootDir,
-	}
-
-	if profileName == "" {
-		profileName = randname.AdjNoun{}.Generate()
-		fmt.Println("Profile Name: ", profileName)
-	}
-	debugLog.Println(profileName)
-
-	for entry := range targetPackages.Enumerate(nil) {
+	if outputLocation == "" {
+		output = os.Stdout
+	} else {
 		var err error
-		var destination string
-
-		dir, ok := entry.(string)
-		if !ok {
-			return
-		}
-
-		destination, err = getAliasPath(dir, profileName)
+		output, err = os.Create(outputLocation)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
-			return
+			os.Exit(1)
 		}
+	}
 
-		destination = path.Join(goPath, "src", destination)
+	var files token.FileSet
 
-		err = createAliasPackage(dir, destination)
+	selectedMode := parser.ParseComments
+
+	var fauxPackage ast.Package
+	fauxPackage.Name = "faux"
+	fauxPackage.Files = make(map[string]*ast.File)
+
+	if inputLocation == "" {
+		const filename = "source.go"
+		source, err := parser.ParseFile(&files, filename, os.Stdin, selectedMode)
 		if err != nil {
-			debugLog.Print(err)
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
 		}
-	}
-	exitVal = 0
-}
-
-func createAliasPackage(source, destination string) (err error) {
-	sourceFiles := &token.FileSet{}
-
-	var packages map[string]*ast.Package
-	packages, err = parser.ParseDir(sourceFiles, source, nil, 0)
-
-	if err != nil {
-		return
-	}
-	if packages != nil && len(packages) > 1 {
-		err = errors.New("too many packages in target directory")
-		return
-	}
-
-	os.MkdirAll(destination, os.ModePerm|os.ModeDir)
-
-	outputPath := filepath.Join(destination, "models.go")
-
-	var outputFile *os.File
-	outputFile, err = os.Create(outputPath)
-	if err != nil {
-		return
-	}
-
-	// This should only iterate once, but allows us to access this map without
-	// knowing the name of the package.
-	for _, pkg := range packages {
-		createAliasHelper(pkg, source, outputFile)
-	}
-
-	return nil
-}
-
-func createAliasHelper(original *ast.Package, pkgPath string, output io.Writer) {
-	ast.PackageExports(original)
-
-	maker := aliasMaker{
-		Types:  collection.NewList(),
-		Consts: collection.NewList(),
-		Funcs:  collection.NewList(),
-	}
-	ast.Walk(maker, original)
-
-	fmt.Fprintln(output, "// +build go1.9")
-	fmt.Fprintln(output)
-
-	fmt.Fprintln(output, "package", original.Name)
-	fmt.Fprintln(output)
-
-	fmt.Fprintln(output, "import (")
-	fmt.Fprintln(output, "\t", "original", "\""+trimGoPath(pkgPath)+"\"")
-	fmt.Fprintln(output, ")")
-	fmt.Fprintln(output)
-
-	if collection.Any(maker.Types) {
-		fmt.Fprintln(output, "type (")
-		for t := range maker.Types.Enumerate(nil) {
-			name := t.(*ast.TypeSpec).Name.Name
-			fmt.Fprintln(output, "\t", name, "=", "original."+name)
-		}
-		fmt.Fprintln(output, ")")
-		fmt.Fprintln(output)
-	}
-
-	if collection.Any(maker.Consts) {
-		fmt.Fprintln(output, "const (")
-		for c := range maker.Consts.Enumerate(nil) {
-			name := c.(myConst).Name
-			fmt.Fprintln(output, "\t", name, "=", "original."+name)
-		}
-		fmt.Fprintln(output, ")")
-	}
-
-	for f := range maker.Funcs.Enumerate(nil) {
-		cast := f.(*ast.FuncDecl)
-
-		comments := collection.Empty
-
-		if cast.Doc != nil {
-			comments = collection.Where(collection.AsEnumerable(cast.Doc.List), func(x interface{}) bool {
-				return x != nil
-			})
+		fauxPackage.Files[filename] = source
+		subject = &fauxPackage
+	} else if inputInfo, err := os.Stat(inputLocation); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	} else if inputInfo.IsDir() {
+		packages, err := parser.ParseDir(&files, inputLocation, nil, selectedMode)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
 		}
 
-		for comment := range comments.Enumerate(nil) {
-			fmt.Fprintln(output, "//", comment.(*ast.Comment).Text)
+		for _, v := range packages {
+			subject = v
+			break
 		}
-
-		fmt.Fprintln(output, "// func", cast.Name.Name)
-	}
-}
-
-func (maker aliasMaker) Visit(node ast.Node) ast.Visitor {
-	switch node.(type) {
-	case *ast.Package:
-		return maker
-	case *ast.File:
-		return maker
-	case *ast.FuncDecl:
-		maker.Funcs.Add(node)
-	case *ast.GenDecl:
-		cast := node.(*ast.GenDecl)
-		if cast.Tok == token.TYPE {
-			for _, spec := range cast.Specs {
-				maker.Types.Add(spec)
-			}
-		} else if cast.Tok == token.CONST {
-			for _, spec := range cast.Specs {
-				valSpec := spec.(*ast.ValueSpec)
-				for i, name := range valSpec.Names {
-					maker.Consts.Add(myConst{
-						Name:  name.Name,
-						Type:  valSpec.Type,
-						Value: valSpec.Values[i],
-					})
-				}
-			}
+	} else {
+		source, err := parser.ParseFile(&files, inputLocation, nil, selectedMode)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
 		}
-	}
-	return nil
-}
-
-var rawPackagePath = regexp.MustCompile(`github.com/Azure/azure-sdk-for-go/service/(?P<rp>[\w\d\-\.]+)/(?P<management>management/)?(?P<APIVersion>[\w\d\-\.]+)/(?P<resource>[\w\d\-\.]+)`)
-
-// getAliasPath takes an existing API Version path and a package name, and converts the path
-// to a path which uses the new profile layout.
-func getAliasPath(subject, profile string) (transformed string, err error) {
-	subject = strings.TrimSuffix(subject, "/")
-	subject = trimGoPath(subject)
-
-	matches := rawPackagePath.FindAllStringSubmatch(subject, -1)
-	if matches == nil {
-		err = errors.New("path does not resemble a known package path")
-		return
+		fauxPackage.Files[inputLocation] = source
+		subject = &fauxPackage
 	}
 
-	output := []string{
-		"github.com",
-		"Azure",
-		"azure-sdk-for-go",
-		"profile",
-		profile,
-		matches[0][1],
-	}
-
-	if matches[0][2] == "management/" {
-		output = append(output, "management")
-	}
-
-	output = append(output, matches[0][4])
-
-	transformed = strings.Join(output, "/")
-	return
-}
-
-// trimGoPath removes the prefix defined in the environment variabe GOPATH if it is present in the string provided.
-var trimGoPath = func() func(string) string {
-	splitGo := strings.Split(os.Getenv("GOPATH"), string(os.PathSeparator))
-	splitGo = append(splitGo, "src")
-
-	return func(subject string) string {
-		splitPath := strings.Split(subject, string(os.PathSeparator))
-		for i, dir := range splitGo {
-			if splitPath[i] != dir {
-				return subject
-			}
-		}
-		packageIdentifier := splitPath[len(splitGo):]
-		return path.Join(packageIdentifier...)
-	}
-}()
-
-func getDefaultRoot() string {
-	return path.Join(os.Getenv("GOPATH"), "src", "github.com", "Azure", "azure-sdk-for-go", "service")
 }
