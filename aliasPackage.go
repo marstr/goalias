@@ -16,6 +16,8 @@ type ErrorUnexpectedToken struct {
 	Received token.Token
 }
 
+var errUnexpectedNil = errors.New("unexpected nil")
+
 func (utoken ErrorUnexpectedToken) Error() string {
 	return fmt.Sprintf("Unexpected token %d expecting type: %d", utoken.Received, utoken.Expected)
 }
@@ -80,7 +82,12 @@ func NewAliasPackage(original *ast.Package) (alias *AliasPackage, err error) {
 		},
 	})
 
-	walker := PackageWalker{target: original}
+	var walker collection.Enumerable = PackageWalker{target: original}
+
+	walker = collection.Where(walker, func(x interface{}) (ok bool) {
+		ok = x != nil
+		return
+	})
 
 	generalDecls := collection.Where(walker, func(x interface{}) (ok bool) {
 		_, ok = x.(*ast.GenDecl)
@@ -103,6 +110,7 @@ func NewAliasPackage(original *ast.Package) (alias *AliasPackage, err error) {
 	return
 }
 
+// AddGeneral handles dispatching a GenDecl to either AddConst or AddType.
 func (alias *AliasPackage) AddGeneral(decl *ast.GenDecl) error {
 	var adder func(*ast.GenDecl) error
 
@@ -111,6 +119,11 @@ func (alias *AliasPackage) AddGeneral(decl *ast.GenDecl) error {
 		adder = alias.AddConst
 	case token.TYPE:
 		adder = alias.AddType
+	default:
+		adder = func(item *ast.GenDecl) (result error) {
+			result = fmt.Errorf("Unusable token: %v", item.Tok)
+			return
+		}
 	}
 
 	return adder(decl)
@@ -150,7 +163,7 @@ func (alias *AliasPackage) AddConst(decl *ast.GenDecl) (err error) {
 // AddType adds a Type delcaration block with individual alias for each Spec handed in `decl`
 func (alias *AliasPackage) AddType(decl *ast.GenDecl) (err error) {
 	if decl == nil {
-		err = errors.New("unexpected nil")
+		err = errUnexpectedNil
 		return
 	} else if decl.Tok != token.TYPE {
 		err = ErrorUnexpectedToken{Expected: token.TYPE, Received: decl.Tok}
@@ -161,7 +174,7 @@ func (alias *AliasPackage) AddType(decl *ast.GenDecl) (err error) {
 
 	for _, spec := range decl.Specs {
 		cast := spec.(*ast.TypeSpec)
-		cast.Assign = 0
+		cast.Assign = 1
 		cast.Type = &ast.SelectorExpr{
 			X: &ast.Ident{
 				Name: origImportAlias,
@@ -176,7 +189,48 @@ func (alias *AliasPackage) AddType(decl *ast.GenDecl) (err error) {
 	return
 }
 
-func (alias *AliasPackage) AddFunc(decl *ast.FuncDecl) {
-	copy := *decl
-	copy.Body = &ast.BlockStmt{}
+// AddFunc creates a stub method to redirect the call to the original package, then adds it to the model file.
+func (alias *AliasPackage) AddFunc(decl *ast.FuncDecl) (err error) {
+
+	if decl == nil {
+		err = errUnexpectedNil
+		return
+	}
+
+	paramNames := collection.AsEnumerable(decl.Type.Params.List)
+	paramNames = collection.SelectMany(paramNames, func(x interface{}) collection.Enumerator {
+		return collection.AsEnumerable(x.(*ast.Field).Names).Enumerate(nil)
+	})
+
+	arguments := []ast.Expr{}
+
+	for n := range paramNames.Enumerate(nil) {
+		arguments = append(arguments, n.(*ast.Ident))
+	}
+
+	decl.Body = &ast.BlockStmt{
+		List: []ast.Stmt{
+			&ast.ReturnStmt{
+				Results: []ast.Expr{
+					&ast.CallExpr{
+						Fun: &ast.SelectorExpr{
+							X: &ast.Ident{
+								Name: origImportAlias,
+							},
+							Sel: &ast.Ident{
+								Name: decl.Name.Name,
+							},
+						},
+						Args: arguments,
+					},
+				},
+			},
+		},
+	}
+
+	targetFile := alias.ModelFile()
+
+	targetFile.Decls = append(targetFile.Decls, decl)
+
+	return
 }
