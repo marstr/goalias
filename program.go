@@ -9,6 +9,8 @@ import (
 	"go/token"
 	"io"
 	"os"
+
+	"github.com/marstr/goalias/model"
 )
 
 var (
@@ -26,7 +28,7 @@ func main() {
 		}
 	}()
 
-	aliased, err := NewAliasPackage(subject)
+	aliased, err := model.NewAliasPackage(subject)
 	if err != nil {
 		return
 	}
