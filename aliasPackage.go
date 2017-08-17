@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"go/ast"
 	"go/token"
+	"regexp"
 
 	"github.com/marstr/collection"
 )
@@ -46,6 +47,11 @@ func (alias *AliasPackage) SetModelFile(val *ast.File) {
 func NewAliasPackage(original *ast.Package) (alias *AliasPackage, err error) {
 
 	ast.PackageExports(original)
+	for k := range original.Files {
+		if matched, _ := regexp.MatchString("_test.go$", k); matched {
+			delete(original.Files, k)
+		}
+	}
 
 	const buildTag = "// +build go1.9"
 	models := &ast.File{
