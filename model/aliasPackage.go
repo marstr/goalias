@@ -57,7 +57,7 @@ func NewAliasPackage(original *ast.Package) (alias *AliasPackage, err error) {
 	models := &ast.File{
 		Name: &ast.Ident{
 			Name:    original.Name,
-			NamePos: 1,
+			NamePos: token.Pos(len(buildTag) + 2 + len("package")),
 		},
 		Package: token.Pos(len(buildTag) + 1),
 	}
