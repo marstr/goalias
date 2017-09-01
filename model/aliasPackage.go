@@ -56,7 +56,8 @@ func NewAliasPackage(original *ast.Package) (alias *AliasPackage, err error) {
 	const buildTag = "// +build go1.9"
 	models := &ast.File{
 		Name: &ast.Ident{
-			Name: original.Name,
+			Name:    original.Name,
+			NamePos: 1,
 		},
 		Package: token.Pos(len(buildTag) + 1),
 	}
@@ -71,7 +72,7 @@ func NewAliasPackage(original *ast.Package) (alias *AliasPackage, err error) {
 	models.Comments = append(models.Comments, &ast.CommentGroup{
 		List: []*ast.Comment{
 			&ast.Comment{
-				Slash: 1,
+				Slash: 0,
 				Text:  buildTag,
 			},
 		},
