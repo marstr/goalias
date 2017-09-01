@@ -4,12 +4,13 @@ import (
 	"flag"
 	"fmt"
 	"go/ast"
+	"go/format"
 	"go/parser"
-	"go/printer"
 	"go/token"
 	"io"
 	"os"
 
+	"github.com/marstr/collection"
 	"github.com/marstr/goalias/model"
 )
 
@@ -35,8 +36,8 @@ func main() {
 
 	var files token.FileSet
 
-	//err = format.Node(output, &files, aliased.ModelFile())
-	err = printer.Fprint(output, &files, aliased.ModelFile())
+	err = format.Node(output, &files, aliased.ModelFile())
+	// err = printer.Fprint(output, &files, aliased.ModelFile())
 	if err != nil {
 		return
 	}
@@ -44,10 +45,20 @@ func main() {
 
 func init() {
 	var outputLocation string
+	var originalNamespace string
 	var inputLocation string
+
+	const defaultNamespace = "<input location>"
+
 	flag.StringVar(&outputLocation, "o", "", "The name of the output file that should be generated.")
-	flag.StringVar(&inputLocation, "i", "", "The file or directory containing Go source to be aliased.")
+	flag.StringVar(&originalNamespace, "n", defaultNamespace, "The path that should be used to important the original package.")
 	flag.Parse()
+
+	arg, err := collection.Single(collection.AsEnumerable(flag.Args()))
+	if err != nil {
+		os.Exit(1)
+		return
+	}
 
 	if outputLocation == "" {
 		output = os.Stdout
@@ -62,7 +73,7 @@ func init() {
 
 	var files token.FileSet
 
-	selectedMode := parser.ParseComments
+	const selectedMode = parser.ParseComments
 
 	var fauxPackage ast.Package
 	fauxPackage.Name = "faux"

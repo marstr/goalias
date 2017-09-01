@@ -6,19 +6,20 @@ import (
 	"github.com/marstr/collection"
 )
 
+// PackageWalker traverses an `*ast.Package` looking for top-level declarations of Constants, Functions, Types, or Variables.
 type PackageWalker struct {
 	target ast.Node
 }
 
 func (pw PackageWalker) Enumerate(cancel <-chan struct{}) collection.Enumerator {
-	walker := newDepthBoundPlunger(2)
+	plunger := newDepthBoundPlunger(2)
 	go func() {
-		defer walker.Dispose()
+		defer plunger.Dispose()
 
-		ast.Walk(walker, pw.target)
+		ast.Walk(plunger, pw.target)
 	}()
 
-	return walker.Results()
+	return plunger.Results()
 }
 
 type depthBoundPlunger struct {

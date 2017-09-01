@@ -71,7 +71,8 @@ func NewAliasPackage(original *ast.Package) (alias *AliasPackage, err error) {
 	models.Comments = append(models.Comments, &ast.CommentGroup{
 		List: []*ast.Comment{
 			&ast.Comment{
-				Text: buildTag,
+				Slash: 1,
+				Text:  buildTag,
 			},
 		},
 	})
