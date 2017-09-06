@@ -52,14 +52,12 @@ func NewAliasPackage(original *ast.Package) (alias *AliasPackage, err error) {
 			delete(original.Files, k)
 		}
 	}
-
-	const buildTag = "// +build go1.9"
 	models := &ast.File{
 		Name: &ast.Ident{
 			Name:    original.Name,
-			NamePos: token.Pos(len(buildTag) + 2 + len("package")),
+			NamePos: token.Pos(len("package") + 2),
 		},
-		Package: token.Pos(len(buildTag) + 1),
+		Package: 1,
 	}
 
 	alias = &AliasPackage{
@@ -68,15 +66,6 @@ func NewAliasPackage(original *ast.Package) (alias *AliasPackage, err error) {
 			modelFile: models,
 		},
 	}
-
-	models.Comments = append(models.Comments, &ast.CommentGroup{
-		List: []*ast.Comment{
-			&ast.Comment{
-				Slash: 0,
-				Text:  buildTag,
-			},
-		},
-	})
 
 	models.Decls = append(models.Decls, &ast.GenDecl{
 		Tok: token.IMPORT,
