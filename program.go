@@ -51,7 +51,7 @@ func init() {
 	const defaultNamespace = "<input location>"
 
 	flag.StringVar(&outputLocation, "o", "", "The name of the output file that should be generated.")
-	flag.StringVar(&originalNamespace, "n", defaultNamespace, "The path that should be used to important the original package.")
+	flag.StringVar(&originalNamespace, "n", defaultNamespace, "The path that should be used to import the original package.")
 	flag.Parse()
 
 	arg, err := collection.Single(collection.AsEnumerable(flag.Args()))

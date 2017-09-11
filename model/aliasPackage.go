@@ -6,6 +6,7 @@ import (
 	"go/ast"
 	"go/token"
 	"regexp"
+	"strings"
 
 	"github.com/marstr/collection"
 )
@@ -44,14 +45,16 @@ func (alias *AliasPackage) SetModelFile(val *ast.File) {
 }
 
 // NewAliasPackage stuff and things
-func NewAliasPackage(original *ast.Package) (alias *AliasPackage, err error) {
-
+func NewAliasPackage(original *ast.Package, originalLocation string) (alias *AliasPackage, err error) {
 	ast.PackageExports(original)
 	for k := range original.Files {
 		if matched, _ := regexp.MatchString("_test.go$", k); matched {
 			delete(original.Files, k)
 		}
 	}
+
+	originalLocation = strings.Replace(originalLocation, `\`, "/", -1)
+
 	models := &ast.File{
 		Name: &ast.Ident{
 			Name:    original.Name,
@@ -76,7 +79,7 @@ func NewAliasPackage(original *ast.Package) (alias *AliasPackage, err error) {
 				},
 				Path: &ast.BasicLit{
 					Kind:  token.STRING,
-					Value: fmt.Sprintf("\"%s\"", original.Name),
+					Value: fmt.Sprintf("\"%s\"", originalLocation),
 				},
 			},
 		},
